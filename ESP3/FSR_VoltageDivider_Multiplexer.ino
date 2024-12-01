@@ -8,7 +8,7 @@
 #define S1_MUX2 22
 #define S2_MUX2 21
 #define S3_MUX2 19
-#define COM_OUT_MUX2 32 
+#define COM_OUT_MUX2 32
 
 #define S0_MUX3 25
 #define S1_MUX3 4
@@ -18,6 +18,8 @@
 
 #define LIGHTLY_PRESSED_THRESHOLD 2000
 #define HEAVILY_PRESSED_THRESHOLD 3000
+
+const int NUM_CHANNELS = 12;
 
 void selectMuxChannel(int mux, int channel) 
 {
@@ -91,20 +93,20 @@ void loop()
 {
     for (int mux = 1; mux <= 3; mux++) 
     {
-        for (int channel = 0; channel < 12; channel++) 
+        for (int channel = 0; channel < NUM_CHANNELS; channel++) 
         {
             int fsrValue = readMux(mux, channel);
 
             if (fsrValue > HEAVILY_PRESSED_THRESHOLD) 
             {
                 Serial.print("FSR "); 
-                Serial.print(((mux - 1) * 12) + channel + 1);
+                Serial.print(((mux - 1) * NUM_CHANNELS) + channel + 1);
                 Serial.println(": Heavily Pressed");
             } 
             else if (fsrValue > LIGHTLY_PRESSED_THRESHOLD) 
             {
                 Serial.print("FSR "); 
-                Serial.print(((mux - 1) * 12) + channel + 1);
+                Serial.print(((mux - 1) * NUM_CHANNELS) + channel + 1);
                 Serial.println(": Lightly Pressed");
             }
         }
