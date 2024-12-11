@@ -33,7 +33,7 @@ void callback(char* topic, byte* payload, unsigned int length);
 void updateActuatorCommand(const String& topic, const JsonDocument& doc);
 void publishFeedback(int index);
 
-void setup() 
+void setup()
 {
   Serial.begin(115200);
   Serial1.begin(1000000, SERIAL_8N1, S_RXD, S_TXD);
@@ -55,7 +55,7 @@ void setup()
   Serial.printf("Setup complete.\n");
 }
 
-void loop() 
+void loop()
 {
   if (!client.connected()) 
   {
@@ -162,9 +162,59 @@ void updateActuatorCommand(const String& topic, const JsonDocument& doc)
   {
     if (topic.endsWith(String(ID[i]) + "/command")) 
     {
-      positionSync[i] = doc["position"] | positionSync[i];
-      speedSync[i] = doc["speed"] | speedSync[i];
-      accelerationSync[i] = doc["acceleration"] | accelerationSync[i];
+      int newPosition = doc["position"] | positionSync[i];
+      int newSpeed = doc["speed"] | speedSync[i];
+      int newAcceleration = doc["acceleration"] | accelerationSync[i];
+
+      switch (ID[i])
+      {
+        case 2:
+          if (newPosition < 2040 || newPosition > 2670) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 2040-2670\n", ID[i]);
+            return;
+          }
+          break;
+        case 3:
+          if (newPosition < 3760 || newPosition > 4040) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 3760-4040\n", ID[i]);
+            return;
+          }
+          break;
+        case 4:
+          if (newPosition < 110 || newPosition > 1070) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 110-1070\n", ID[i]);
+            return;
+          }
+          break;
+        case 5:
+          if (newPosition < 2420 || newPosition > 2870) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 2420-2870\n", ID[i]);
+            return;
+          }
+          break;
+        case 6:
+          if (newPosition < 1850 || newPosition > 2400) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 1850-2400\n", ID[i]);
+            return;
+          }
+          break;
+        case 7:
+          if (newPosition < 720 || newPosition > 1620) 
+          {
+            Serial.printf("Invalid position for Actuator %d. Allowed range: 720-1620\n", ID[i]);
+            return;
+          }
+          break;
+      }
+
+      positionSync[i] = newPosition;
+      speedSync[i] = newSpeed;
+      accelerationSync[i] = newAcceleration;
 
       Serial.printf("Updated Actuator %d - Position: %d, Speed: %d, Acceleration: %d\n",
                     ID[i], positionSync[i], speedSync[i], accelerationSync[i]);
