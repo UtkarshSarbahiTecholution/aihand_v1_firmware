@@ -17,20 +17,19 @@ PubSubClient client(espClient);
 SMS_STS sms_sts;
 Servo myservo;
 
-byte ID[6] = {2, 5, 3, 7, 4, 6};
-s16 positionSync[6] = {0};
+byte ID[6] = {2, 3, 4, 5, 6, 7};
+s16 positionSync[6] = {2040, 4040, 340, 2870, 1440, 2047};
 u16 speedSync[6] = {1000, 1000, 1000, 1000, 1000, 1000};
 byte accelerationSync[6] = {20, 20, 20, 20, 20, 20};
-bool isMoving[6] = {false};
 
-const int servoPin = 23;
-int pos = 0;
+const int servoPin = 23;  
+int pos = 180;
 bool positionChanged = false;
 
 void setupWiFi();
 void reconnect();
 void callback(char* topic, byte* payload, unsigned int length);
-void updateActuatorCommand(const String& topic, const JsonDocument& doc);
+void publishFeedbackForAll();
 void publishFeedback(int index);
 
 void setup()
@@ -38,21 +37,19 @@ void setup()
   Serial.begin(115200);
   Serial1.begin(1000000, SERIAL_8N1, S_RXD, S_TXD);
   sms_sts.pSerial = &Serial1;
+
   setupWiFi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
-  for (int i = 0; i < 6; i++) 
-  {
-    client.subscribe(("actuator/" + String(ID[i]) + "/command").c_str());
-  }
-
+  client.subscribe("actuator/group/command");
   client.subscribe("actuator/wrist/command");
 
   ESP32PWM::allocateTimer(0);
-  myservo.setPeriodHertz(50);
+  myservo.setPeriodHertz(50); 
   myservo.attach(servoPin, 500, 2500);
-  Serial.printf("Setup complete.\n");
+
+  Serial.println("Setup complete.");
 }
 
 void loop()
@@ -65,21 +62,15 @@ void loop()
 
   sms_sts.SyncWritePosEx(ID, 6, positionSync, speedSync, accelerationSync);
 
-  for (int i = 0; i < 6; i++) 
-  {
-    bool moving = sms_sts.ReadMove(ID[i]);
-    if (moving != isMoving[i] && isMoving[i] != false) 
-    {
-      isMoving[i] = moving;
-      publishFeedback(i);
-    }
-  }
-
   if (positionChanged) 
   {
     myservo.write(pos);
-    Serial.printf("Servo moved to position: %d\n", pos);
+    Serial.printf("ESP32 Servo moved to position: %d\n", pos);
     positionChanged = false;
+  }
+  else
+  {
+    myservo.write(pos);
   }
 
   delay(10);
@@ -92,7 +83,7 @@ void setupWiFi()
   while (WiFi.status() != WL_CONNECTED) 
   {
     delay(500);
-    Serial.printf(".");
+    Serial.print(".");
   }
   Serial.printf("\nWi-Fi connected. IP Address: %s\n", WiFi.localIP().toString().c_str());
 }
@@ -104,11 +95,8 @@ void reconnect()
     Serial.printf("Connecting to MQTT...");
     if (client.connect("ESP32_Servo_Client")) 
     {
-      Serial.printf("Connected.\n");
-      for (int i = 0; i < 6; i++) 
-      {
-        client.subscribe(("actuator/" + String(ID[i]) + "/command").c_str());
-      }
+      Serial.println("Connected.");
+      client.subscribe("actuator/group/command");
       client.subscribe("actuator/wrist/command");
     } 
     else 
@@ -121,23 +109,53 @@ void reconnect()
 
 void callback(char* topic, byte* payload, unsigned int length) 
 {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<512> doc;
   if (deserializeJson(doc, payload, length)) 
   {
-    Serial.printf("JSON Parsing Failed.\n");
+    Serial.println("JSON Parsing Failed.");
     return;
   }
 
   String topicStr = String(topic);
 
-  for (int i = 0; i < 6; i++) 
+  if (topicStr == "actuator/group/command") 
   {
-    String targetTopic = "actuator/" + String(ID[i]) + "/command";
-    if (topicStr == targetTopic) 
+    JsonArray positions = doc["positions"];
+    JsonArray speeds = doc["speeds"];
+    JsonArray accelerations = doc["accelerations"];
+
+    if (positions.size() != 6 || speeds.size() != 6 || accelerations.size() != 6) 
     {
-      updateActuatorCommand(targetTopic, doc);
+      Serial.println("Invalid array size. Must contain exactly 6 values.");
       return;
     }
+
+    for (int i = 0; i < 6; i++) 
+    {
+      int newPosition = positions[i];
+      int newSpeed = speeds[i];
+      int newAcceleration = accelerations[i];
+
+      if ((ID[i] == 2 && (newPosition < 2040 || newPosition > 2670)) ||
+          (ID[i] == 3 && (newPosition < 3760 || newPosition > 4040)) ||
+          (ID[i] == 4 && (newPosition < 110 || newPosition > 1070)) ||
+          (ID[i] == 5 && (newPosition < 2420 || newPosition > 2870)) ||
+          (ID[i] == 6 && (newPosition < 720 || newPosition > 1620)) ||
+          (ID[i] == 7 && (newPosition < 1850 || newPosition > 2400)))
+      {
+        Serial.printf("Invalid position for Actuator %d: %d\n", ID[i], newPosition);
+        return;
+      }
+
+      positionSync[i] = newPosition;
+      speedSync[i] = newSpeed;
+      accelerationSync[i] = newAcceleration;
+
+      Serial.printf("Updated Actuator %d - Position: %d, Speed: %d, Acceleration: %d\n",
+                    ID[i], positionSync[i], speedSync[i], accelerationSync[i]);
+    }
+
+    publishFeedbackForAll();
   }
 
   if (topicStr == "actuator/wrist/command") 
@@ -151,93 +169,33 @@ void callback(char* topic, byte* payload, unsigned int length)
     } 
     else 
     {
-      Serial.printf("Invalid position for ESP32 Servo. Must be between 100-180.\n");
+      Serial.println("Invalid position for ESP32 Servo. Must be between 100-180.");
     }
   }
 }
 
-void updateActuatorCommand(const String& topic, const JsonDocument& doc) 
+void publishFeedbackForAll() 
 {
+  StaticJsonDocument<512> doc;
+  JsonArray feedbackArray = doc.createNestedArray("feedback");
+
   for (int i = 0; i < 6; i++) 
   {
-    if (topic.endsWith(String(ID[i]) + "/command")) 
-    {
-      int newPosition = doc["position"] | positionSync[i];
-      int newSpeed = doc["speed"] | speedSync[i];
-      int newAcceleration = doc["acceleration"] | accelerationSync[i];
-
-      switch (ID[i])
-      {
-        case 2:
-          if (newPosition < 2040 || newPosition > 2670) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 2040-2670\n", ID[i]);
-            return;
-          }
-          break;
-        case 3:
-          if (newPosition < 3760 || newPosition > 4040) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 3760-4040\n", ID[i]);
-            return;
-          }
-          break;
-        case 4:
-          if (newPosition < 110 || newPosition > 1070) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 110-1070\n", ID[i]);
-            return;
-          }
-          break;
-        case 5:
-          if (newPosition < 2420 || newPosition > 2870) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 2420-2870\n", ID[i]);
-            return;
-          }
-          break;
-        case 6:
-          if (newPosition < 1850 || newPosition > 2400) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 1850-2400\n", ID[i]);
-            return;
-          }
-          break;
-        case 7:
-          if (newPosition < 720 || newPosition > 1620) 
-          {
-            Serial.printf("Invalid position for Actuator %d. Allowed range: 720-1620\n", ID[i]);
-            return;
-          }
-          break;
-      }
-
-      positionSync[i] = newPosition;
-      speedSync[i] = newSpeed;
-      accelerationSync[i] = newAcceleration;
-
-      Serial.printf("Updated Actuator %d - Position: %d, Speed: %d, Acceleration: %d\n",
-                    ID[i], positionSync[i], speedSync[i], accelerationSync[i]);
-      return;
-    }
+    JsonObject servoData = feedbackArray.createNestedObject();
+    servoData["ID"] = ID[i];
+    servoData["position"] = sms_sts.ReadPos(ID[i]);
+    servoData["speed"] = sms_sts.ReadSpeed(ID[i]);
+    servoData["load"] = sms_sts.ReadLoad(ID[i]);
+    servoData["voltage"] = sms_sts.ReadVoltage(ID[i]);
+    servoData["temperature"] = sms_sts.ReadTemper(ID[i]);
+    servoData["movement"] = sms_sts.ReadMove(ID[i]);
+    servoData["current"] = sms_sts.ReadCurrent(ID[i]);
   }
-}
 
-void publishFeedback(int index) 
-{
-  StaticJsonDocument<256> doc;
-  doc["position"] = sms_sts.ReadPos(ID[index]);
-  doc["speed"] = sms_sts.ReadSpeed(ID[index]);
-  doc["load"] = sms_sts.ReadLoad(ID[index]);
-  doc["voltage"] = sms_sts.ReadVoltage(ID[index]);
-  doc["temperature"] = sms_sts.ReadTemper(ID[index]);
-  doc["movement"] = sms_sts.ReadMove(ID[index]);
-  doc["current"] = sms_sts.ReadCurrent(ID[index]);
-
-  String topic = "actuator/" + String(ID[index]) + "/feedback";
-  char buffer[256];
+  char buffer[512];
   serializeJson(doc, buffer);
-  client.publish(topic.c_str(), buffer);
+  client.publish("actuator/group/feedback", buffer);
 
-  Serial.printf("Published Feedback for Actuator %d\n", ID[index]);
+  Serial.println("Published feedback for all actuators.");
 }
+
